@@ -11,6 +11,8 @@ from agents.explainer_agent import explainer_agent
 from agents.writer_agent import writer_agent
 from agents.quiz_agent import quiz_agent
 from agents.feedback_agent import feedback_agent
+from agents.general_qa_agent import general_qa_agent
+from utils.message_history import message_history
 
 
 class OrchestratorAgent:
@@ -85,6 +87,10 @@ class OrchestratorAgent:
             elif task_type == "quiz_generation":
                 # Handle quiz generation flow
                 result.update(self._handle_quiz_generation_flow(user_input, session_state))
+
+            elif task_type == "general_question":
+                # Handle general Q&A flow
+                result.update(self._handle_general_qa_flow(user_input, session_state))
 
             else:
                 result["error"] = f"Unknown task type: {task_type}"
@@ -325,6 +331,72 @@ class OrchestratorAgent:
 
         except Exception as e:
             result["error"] = f"Quiz generation error: {str(e)}"
+
+        return result
+
+    def _handle_general_qa_flow(
+        self,
+        user_input: str,
+        session_state: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Handle general Q&A when user asks general questions.
+
+        Args:
+            user_input: The user's question
+            session_state: Session state
+
+        Returns:
+            Dictionary with general Q&A results
+        """
+        result = {
+            "main_result": None,
+            "autonomous_actions": [],
+            "suggested_next_steps": None
+        }
+
+        try:
+            # Get recent message history for context
+            recent_messages = message_history.get_recent_messages()
+
+            # Build context string from recent messages
+            context = None
+            if recent_messages and len(recent_messages) > 0:
+                # Exclude the current message (last one) and get previous messages
+                previous_messages = recent_messages[:-1] if len(recent_messages) > 1 else []
+
+                if previous_messages:
+                    context = "Previous user messages:\n"
+                    for i, msg in enumerate(previous_messages[-4:], 1):  # Use last 4 messages for context
+                        # Truncate long messages
+                        truncated = msg[:150] + "..." if len(msg) > 150 else msg
+                        context += f"{i}. {truncated}\n"
+
+                    result["autonomous_actions"].append({
+                        "agent": "Orchestrator",
+                        "action": "Gathered conversation context",
+                        "decision": f"Using {len(previous_messages)} previous messages for context-aware response"
+                    })
+
+            # Get answer from general Q&A agent with context
+            qa_response = general_qa_agent.answer(user_input, context=context)
+            result["main_result"] = {
+                "type": "general_qa",
+                "data": qa_response
+            }
+            result["autonomous_actions"].append({
+                "agent": "General Q&A",
+                "action": "Generated context-aware bilingual answer",
+                "decision": f"Provided {qa_response.get('category', 'general')} response with conversation awareness"
+            })
+
+            # Store in session for potential context
+            if session_state is not None:
+                session_state["last_qa"] = qa_response
+                session_state["last_question"] = user_input
+
+        except Exception as e:
+            result["error"] = f"General Q&A flow error: {str(e)}"
 
         return result
 

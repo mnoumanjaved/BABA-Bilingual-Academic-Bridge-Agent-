@@ -10,6 +10,7 @@ import streamlit as st
 from config import config
 from agents.orchestrator import orchestrator
 from utils.arabic_utils import arabic_utils
+from utils.message_history import message_history
 
 # Page configuration
 st.set_page_config(
@@ -150,15 +151,29 @@ def initialize_session_state():
 
 
 def render_header():
-    """Render the application header."""
-    st.markdown(f"""
-    <div style='text-align: center; padding: 1rem 0; border-bottom: 1px solid rgba(0,0,0,0.1);'>
-        <h1 style='margin: 0; font-size: 1.5rem;'>{config.PAGE_ICON} BABA</h1>
-        <p style='margin: 0.25rem 0 0 0; font-size: 0.9rem; color: #666;'>
-            Bilingual Academic Bridge Agent | وكيل الجسر الأكاديمي ثنائي اللغة
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    """Render the application header with Clear Session button."""
+    # Create columns for header layout
+    col1, col2 = st.columns([6, 1])
+
+    with col1:
+        st.markdown(f"""
+        <div style='text-align: center; padding: 1rem 0;'>
+            <h1 style='margin: 0; font-size: 1.5rem;'>{config.PAGE_ICON} BABA</h1>
+            <p style='margin: 0.25rem 0 0 0; font-size: 0.9rem; color: #666;'>
+                Bilingual Academic Bridge Agent | وكيل الجسر الأكاديمي ثنائي اللغة
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("<div style='padding: 1rem 0;'>", unsafe_allow_html=True)
+        if st.button("🔄 Clear", key="clear_session_top", help="Clear current session"):
+            st.session_state.clear()
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Add bottom border
+    st.markdown("<div style='border-bottom: 1px solid rgba(0,0,0,0.1); margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
 
 
 def render_sidebar():
@@ -207,9 +222,20 @@ def render_sidebar():
 
         st.markdown("---")
 
-        if st.button("🔄 Clear Session", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
+        # Recent messages history
+        recent_messages = message_history.get_recent_messages()
+        if recent_messages:
+            st.header("📝 Recent Messages")
+            st.caption("Your last 5 messages (persisted)")
+            for i, msg in enumerate(recent_messages[-5:], 1):
+                # Truncate long messages
+                truncated = msg[:50] + "..." if len(msg) > 50 else msg
+                st.caption(f"{i}. {truncated}")
+
+            if st.button("🗑️ Clear History", use_container_width=True, key="clear_history"):
+                message_history.clear_history()
+                st.success("Message history cleared!")
+                st.rerun()
 
 
 def display_autonomous_actions(actions):
@@ -321,6 +347,45 @@ def display_writing_result(data):
             st.markdown(f"• {improvement}")
 
 
+def display_general_qa(data):
+    """Display general Q&A results."""
+    st.markdown("**💬 Answer | الإجابة**")
+    st.markdown("")
+
+    # Bilingual answer side by side
+    st.markdown(f"""
+    <div class="bilingual-container">
+        <div class="bilingual-column">
+            <div class="section-header">English</div>
+            <div class="english-text">{data["english_answer"]}</div>
+        </div>
+        <div class="bilingual-column">
+            <div class="section-header">العربية</div>
+            <div class="arabic-text">{data["arabic_answer"]}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Category and confidence (optional display)
+    if data.get("category"):
+        category_emoji = {
+            "advice": "💡",
+            "how-to": "📋",
+            "factual": "📚",
+            "conversational": "💬",
+            "motivation": "🌟"
+        }
+        emoji = category_emoji.get(data["category"], "💬")
+        st.caption(f"{emoji} Category: {data['category'].replace('_', ' ').title()}")
+
+    # Follow-up suggestions
+    if data.get("follow_up_suggestions") and len(data["follow_up_suggestions"]) > 0:
+        st.markdown("")
+        st.markdown("**🔍 Related Questions You Might Ask:**")
+        for suggestion in data["follow_up_suggestions"]:
+            st.markdown(f"• {suggestion}")
+
+
 def display_quiz(quiz_data, quiz_id=None):
     """Display quiz questions."""
     if not quiz_data or "questions" not in quiz_data:
@@ -361,16 +426,21 @@ def display_quiz(quiz_data, quiz_id=None):
                 # Only English available
                 bilingual_options.append(options_en[idx])
 
-        # Radio buttons for answers with unique key
+        # Radio buttons for answers with unique key - no default selection
         user_answer = st.radio(
             f"Select your answer:",
             options=range(len(bilingual_options)),
             format_func=lambda x: bilingual_options[x],
+            index=None,  # No option selected by default
             key=f"quiz_q_{i}_{quiz_id}"
         )
 
         # Check answer button with unique key
         if st.button(f"Check Answer", key=f"check_{i}_{quiz_id}"):
+            # Validate that an answer was selected
+            if user_answer is None:
+                st.warning("⚠️ Please select an answer first! | الرجاء اختيار إجابة أولاً!")
+                continue
             result = orchestrator.check_quiz_answer(i, user_answer, quiz_data)
 
             # Store in history
@@ -492,6 +562,9 @@ def main():
                         elif main_result["type"] == "writing_improvement":
                             display_writing_result(main_result["data"])
 
+                        elif main_result["type"] == "general_qa":
+                            display_general_qa(main_result["data"])
+
                         elif main_result["type"] == "quiz":
                             st.markdown("**🎯 Quiz Time! | وقت الاختبار!**")
                             st.markdown("")
@@ -528,6 +601,9 @@ def main():
 
     # Process user input
     if user_input:
+        # Save to persistent message history
+        message_history.add_message(user_input)
+
         # Add user message to chat
         st.session_state.messages.append({
             "role": "user",
@@ -589,6 +665,9 @@ def main():
 
                     elif main_result["type"] == "writing_improvement":
                         display_writing_result(main_result["data"])
+
+                    elif main_result["type"] == "general_qa":
+                        display_general_qa(main_result["data"])
 
                     elif main_result["type"] == "quiz":
                         st.markdown("**🎯 Quiz Time! | وقت الاختبار!**")

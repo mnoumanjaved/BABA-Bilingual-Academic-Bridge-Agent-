@@ -85,23 +85,36 @@ class TaskClassifierAgent:
         if user_input_lower in ["yes", "yeah", "ok", "sure", "y", "نعم", "أجل", "موافق"]:
             is_quiz = True
 
-        # Check for explanation indicators
-        question_indicators = ["what", "how", "why", "explain", "understand", "ما", "كيف", "لماذا", "شرح", "أفهم"]
-        is_question = any(indicator in user_input_lower for indicator in question_indicators)
+        # Check for explanation indicators (academic concepts)
+        explanation_indicators = ["what is", "what are", "explain the concept", "define", "ما هو", "ما هي"]
+        is_academic_question = any(indicator in user_input_lower for indicator in explanation_indicators)
+
+        # Check for general question indicators
+        general_indicators = ["how to", "how can", "how do", "advice", "help me", "hello", "hi", "thanks",
+                             "كيف", "نصيحة", "مرحبا", "شكرا"]
+        is_general = any(indicator in user_input_lower for indicator in general_indicators)
+
+        # Check for greeting keywords
+        greeting_indicators = ["hello", "hi", "hey", "good morning", "good evening", "مرحبا", "السلام"]
+        is_greeting = any(indicator in user_input_lower for indicator in greeting_indicators)
 
         # Check length - longer texts are more likely to be writing samples
         is_long = len(user_input.split()) > 20
 
-        # Classification priority: quiz > question > long text > default
+        # Classification priority: quiz > greeting > academic concept > long text > general question
         if is_quiz:
             task_type = "quiz_generation"
-        elif is_question and not is_long:
+        elif is_greeting:
+            task_type = "general_question"
+        elif is_academic_question and not is_long:
             task_type = "explanation"
         elif is_long:
             task_type = "writing_improvement"
+        elif is_general:
+            task_type = "general_question"
         else:
-            # Default to explanation for short, unclear inputs
-            task_type = "explanation"
+            # Default to general question for unclear inputs
+            task_type = "general_question"
 
         return {
             "task_type": task_type,

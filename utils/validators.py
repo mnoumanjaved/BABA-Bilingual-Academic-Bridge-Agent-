@@ -49,7 +49,7 @@ class Validators:
             if field not in result:
                 return False, f"Missing required field: {field}"
 
-        valid_task_types = ["explanation", "writing_improvement"]
+        valid_task_types = ["explanation", "writing_improvement", "quiz_generation", "general_question"]
         if result["task_type"] not in valid_task_types:
             return False, f"Invalid task type: {result['task_type']}"
 
@@ -149,6 +149,45 @@ class Validators:
 
             if question["correct_answer"] < 0 or question["correct_answer"] >= len(question["options"]):
                 return False, f"Question {i+1}: correct_answer index out of range"
+
+        return True, None
+
+    @staticmethod
+    def validate_general_qa_result(result: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """
+        Validate general Q&A result.
+
+        Args:
+            result: General Q&A result dictionary
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        required_fields = ["english_answer", "arabic_answer"]
+
+        for field in required_fields:
+            if field not in result:
+                return False, f"Missing required field: {field}"
+
+            if not isinstance(result[field], str):
+                return False, f"Field {field} must be a string"
+
+            if len(result[field].strip()) < 5:
+                return False, f"Field {field} is too short"
+
+        # Optional fields validation
+        if "category" in result and not isinstance(result["category"], str):
+            return False, "Category must be a string"
+
+        if "confidence" in result:
+            if not isinstance(result["confidence"], (int, float)):
+                return False, "Confidence must be a number"
+            if not 0 <= result["confidence"] <= 1:
+                return False, "Confidence must be between 0 and 1"
+
+        if "follow_up_suggestions" in result:
+            if not isinstance(result["follow_up_suggestions"], list):
+                return False, "Follow-up suggestions must be a list"
 
         return True, None
 
