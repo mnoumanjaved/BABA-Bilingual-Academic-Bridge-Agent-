@@ -347,14 +347,25 @@ def display_quiz(quiz_data, quiz_id=None):
             st.markdown(f'<div class="arabic-text"><strong>{question["question_ar"]}</strong></div>',
                        unsafe_allow_html=True)
 
-        # Get options (use Arabic if available, otherwise English)
-        options = question.get("options_ar", question["options"])
+        # Create bilingual options (English / Arabic)
+        options_en = question.get("options", [])
+        options_ar = question.get("options_ar", [])
+
+        # Combine English and Arabic options into bilingual format
+        bilingual_options = []
+        for idx in range(len(options_en)):
+            if idx < len(options_ar):
+                # Both English and Arabic available
+                bilingual_options.append(f"{options_en[idx]} / {options_ar[idx]}")
+            else:
+                # Only English available
+                bilingual_options.append(options_en[idx])
 
         # Radio buttons for answers with unique key
         user_answer = st.radio(
             f"Select your answer:",
-            options=range(len(options)),
-            format_func=lambda x: options[x],
+            options=range(len(bilingual_options)),
+            format_func=lambda x: bilingual_options[x],
             key=f"quiz_q_{i}_{quiz_id}"
         )
 

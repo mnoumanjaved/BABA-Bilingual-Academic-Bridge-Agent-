@@ -236,10 +236,18 @@ class OrchestratorAgent:
 
         try:
             # Check if user is just affirming (yes, ok, sure) - use previous context
-            affirmative_responses = ["yes", "yeah", "ok", "sure", "y", "نعم", "أجل", "موافق"]
+            # Also include standalone words like "quiz", "test", "exam" as affirmative
+            affirmative_responses = ["yes", "yeah", "ok", "sure", "y", "quiz", "test", "exam",
+                                    "نعم", "أجل", "موافق", "اختبار", "امتحان"]
             is_simple_affirmation = user_input.lower().strip() in affirmative_responses
 
-            if is_simple_affirmation:
+            # Check if user is explicitly specifying a quiz topic (not just affirming)
+            quiz_topic_keywords = ["quiz on", "quiz about", "test on", "test about",
+                                  "generate quiz", "create quiz", "make quiz",
+                                  "اختبار عن", "اختبار حول"]
+            has_explicit_topic = any(keyword in user_input.lower() for keyword in quiz_topic_keywords)
+
+            if is_simple_affirmation and not has_explicit_topic:
                 # User is responding to a quiz suggestion - use previous context
                 if session_state and "last_explanation" in session_state:
                     # Generate quiz based on previous explanation
@@ -257,8 +265,8 @@ class OrchestratorAgent:
                         "decision": "Created bilingual quiz based on previous explanation"
                     })
 
-                elif session_state and "last_writing" in session_state:
-                    # Generate quiz on writing skills
+                elif session_state and "last_writing" in session_state and not has_explicit_topic:
+                    # Generate quiz on writing skills (only if no explicit topic specified)
                     writing = session_state["last_writing"]
                     quiz_content = f"Writing skills quiz based on: {writing.get('improved_text', '')}"
 
@@ -288,7 +296,7 @@ class OrchestratorAgent:
                 # Extract the topic from user input
                 topic = self._extract_quiz_topic(user_input)
 
-                # First get explanation of the topic
+                # First get explanation of the topic (always generate fresh content)
                 explanation = explainer_agent.explain(topic)
 
                 # Store for potential future reference
@@ -296,7 +304,7 @@ class OrchestratorAgent:
                     session_state["last_explanation"] = explanation
                     session_state["last_topic"] = topic
 
-                # Generate quiz based on the explanation
+                # Generate quiz based on the NEW explanation
                 quiz_content = f"{explanation.get('english_explanation', '')}\n\n{explanation.get('gulf_example', '')}"
                 quiz = quiz_agent.generate(quiz_content)
 
@@ -306,13 +314,13 @@ class OrchestratorAgent:
                 }
                 result["autonomous_actions"].append({
                     "agent": "Explainer",
-                    "action": "Generated content for quiz",
-                    "decision": f"Created explanation about '{topic}' as basis for quiz"
+                    "action": "Generated fresh content for quiz",
+                    "decision": f"Created new explanation about '{topic}' as basis for quiz"
                 })
                 result["autonomous_actions"].append({
                     "agent": "Quiz Generator",
-                    "action": "Generated quiz",
-                    "decision": f"Created bilingual quiz on '{topic}'"
+                    "action": "Generated quiz on specified topic",
+                    "decision": f"Created bilingual quiz on '{topic}' using fresh content"
                 })
 
         except Exception as e:
@@ -330,27 +338,70 @@ class OrchestratorAgent:
         Returns:
             The extracted topic
         """
-        # Remove common quiz keywords to extract the topic
+        import re
+
+        # Remove common quiz keywords to extract the topic (order matters - longer phrases first)
         quiz_keywords = [
-            "quiz on", "quiz about", "test on", "test about",
-            "generate quiz", "create quiz", "make quiz",
-            "اختبار عن", "اختبار حول",
-            "on topic", "about", "on the topic"
+            "generate a quiz on the topic",
+            "generate quiz on the topic",
+            "create a quiz on the topic",
+            "create quiz on the topic",
+            "make a quiz on the topic",
+            "make quiz on the topic",
+            "quiz on the topic",
+            "test on the topic",
+            "generate a quiz on",
+            "generate quiz on",
+            "create a quiz on",
+            "create quiz on",
+            "make a quiz on",
+            "make quiz on",
+            "quiz on",
+            "quiz about",
+            "test on",
+            "test about",
+            "generate quiz",
+            "create quiz",
+            "make quiz",
+            "اختبار عن",
+            "اختبار حول",
         ]
 
         topic = user_input.lower()
 
-        # Remove quiz keywords
+        # Remove quiz keywords (longest first to avoid partial matches)
         for keyword in quiz_keywords:
-            topic = topic.replace(keyword, "")
+            topic = topic.replace(keyword, " ")
 
-        # Remove common words
-        topic = topic.replace("generate", "").replace("create", "").replace("make", "")
-        topic = topic.replace("quiz", "").replace("test", "").replace("exam", "")
-        topic = topic.replace("the", "").replace("a", "").replace("an", "")
-        topic = topic.replace("?", "").replace("!", "")
+        # Clean up whitespace first
+        topic = " ".join(topic.split()).strip()
 
-        # Clean up whitespace
+        # Check if it's a "what is X" or "how does X" type question
+        # If so, preserve it as-is for better context
+        question_patterns = [
+            r'what is \w+',
+            r'what are \w+',
+            r'how does \w+',
+            r'how do \w+',
+            r'why is \w+',
+            r'why are \w+',
+            r'explain \w+'
+        ]
+
+        is_question_format = any(re.search(pattern, topic) for pattern in question_patterns)
+
+        if not is_question_format:
+            # Only remove common words if it's NOT a question format
+            # This preserves question context like "what is langgraph"
+            words_to_remove = ["generate", "create", "make", "quiz", "test", "exam", "the", "a", "an"]
+            for word in words_to_remove:
+                # Use regex to match whole words only
+                topic = re.sub(r'\b' + re.escape(word) + r'\b', '', topic)
+
+        # Remove punctuation
+        topic = topic.replace("?", "").replace("!", "").replace(",", "")
+
+        # Clean up whitespace again
         topic = " ".join(topic.split()).strip()
 
         # If topic is still empty or too short, use original input
